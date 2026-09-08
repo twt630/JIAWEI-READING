@@ -1,0 +1,18 @@
+import { expect, test } from '@playwright/test'
+
+test('imports a TXT, opens it, and keeps reading settings', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('input[type=file]').setInputFiles({ name: '山中一夜.txt', mimeType: 'text/plain', buffer: Buffer.from('第一段。\n\n第二段。\n'.repeat(200)) })
+  await expect(page.getByRole('dialog')).toContainText('第一段')
+  await page.getByRole('button', { name: '确认导入' }).click()
+  await expect(page.getByText('山中一夜', { exact: true }).first()).toBeVisible()
+  await page.getByRole('button', { name: /山中一夜/ }).first().click()
+  await expect(page.getByText('第一段。', { exact: false }).first()).toBeVisible()
+  await page.getByRole('button', { name: '阅读设置' }).click()
+  await page.getByRole('slider', { name: '字号' }).fill('24')
+  await page.reload()
+  await page.getByRole('button', { name: '阅读设置' }).click()
+  await expect(page.getByRole('slider', { name: '字号' })).toHaveValue('24')
+  await page.getByRole('button', { name: /书架/ }).click()
+  await expect(page.getByText('山中一夜', { exact: true }).first()).toBeVisible()
+})
