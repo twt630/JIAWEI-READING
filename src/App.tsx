@@ -82,7 +82,7 @@ function Library({ notify }: { notify: (notice: Notice) => void }) {
 
   return <main className="library-shell">
     <header className="library-header">
-      <div><span className="eyebrow">YOUR PRIVATE LIBRARY</span><h1>拾页</h1><p>把散落在电脑里的文字，收进一处安静的地方。</p></div>
+      <div><span className="eyebrow">YOUR PRIVATE LIBRARY</span><h1>JIAWEI READING</h1><p>把散落在电脑里的文字，收进一处安静的地方。</p></div>
       <button className="primary" disabled={busy} onClick={() => input.current?.click()}>{busy ? '正在解读…' : '＋ 导入 TXT'}</button>
       <input ref={input} hidden type="file" accept=".txt,text/plain" onChange={event => void chooseFile(event.target.files?.[0])} />
     </header>
