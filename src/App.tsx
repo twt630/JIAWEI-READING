@@ -113,8 +113,10 @@ function Reader({ bookId, notify }: { bookId: string; notify: (notice: Notice) =
   const book = useLiveQuery(() => db.books.get(bookId), [bookId])
   const chunks = useLiveQuery(() => db.chunks.where('[bookId+index]').between([bookId, 0], [bookId, DexieMaxKey]).toArray(), [bookId])
   const progress = useLiveQuery(() => db.progress.get(bookId), [bookId])
+  const bookmarks = useLiveQuery(() => db.bookmarks.where('[bookId+offset]').between([bookId, 0], [bookId, Infinity]).toArray(), [bookId])
   const [settings, setSettings] = useState<ReaderSettings>(defaultSettings)
   const [panel, setPanel] = useState(false)
+  const [bookmarkPanel, setBookmarkPanel] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const saveTimer = useRef<number | undefined>(undefined)
   const restored = useRef(false)
@@ -137,13 +139,19 @@ function Reader({ bookId, notify }: { bookId: string; notify: (notice: Notice) =
     }
   }, [chunks, progress, virtual])
 
-  const persist = useCallback(async () => {
-    if (!chunks || !book || !restored.current) return
+  const getVisibleOffset = useCallback(() => {
+    if (!chunks || !book || !restored.current) return null
     const first = virtual.getVirtualItems()[0]
-    if (!first) return
+    if (!first) return null
     const chunk = chunks[first.index]
     const within = Math.round(Math.max(0, -first.start + (scroller.current?.scrollTop ?? 0)) / Math.max(first.size, 1) * chunk.text.length)
-    const offset = Math.min(book.totalLength, chunk.start + within)
+    return Math.min(book.totalLength, chunk.start + within)
+  }, [book, chunks, virtual])
+
+  const persist = useCallback(async () => {
+    if (!book) return
+    const offset = getVisibleOffset()
+    if (offset === null) return
     try {
       await db.transaction('rw', db.progress, db.books, async () => {
         await db.progress.put({ bookId, offset, updatedAt: Date.now(), completed: offset >= book.totalLength - 2 })
@@ -152,7 +160,7 @@ function Reader({ bookId, notify }: { bookId: string; notify: (notice: Notice) =
     } catch {
       notify({ kind: 'error', text: '进度未保存，请保持页面打开并重试。' })
     }
-  }, [book, bookId, chunks, notify, virtual])
+  }, [book, bookId, getVisibleOffset, notify])
 
   useEffect(() => {
     const onHidden = () => { if (document.visibilityState === 'hidden') void persist() }
@@ -167,16 +175,44 @@ function Reader({ bookId, notify }: { bookId: string; notify: (notice: Notice) =
     requestAnimationFrame(() => virtual.measure())
     void saveSettings(next).catch(() => notify({ kind: 'error', text: '阅读设置未保存。' }))
   }
+  const addBookmark = async () => {
+    const offset = getVisibleOffset()
+    if (offset === null || !chunks) return
+    const chunk = chunks.find(item => item.start <= offset && item.start + item.text.length >= offset) ?? chunks[0]
+    const within = Math.max(0, offset - chunk.start)
+    const excerpt = chunk.text.slice(within, within + 42).replace(/\s+/g, ' ').trim() || '此处没有文字'
+    try {
+      await db.bookmarks.add({ id: crypto.randomUUID(), bookId, offset, excerpt, createdAt: Date.now() })
+      setBookmarkPanel(true)
+      setPanel(false)
+      notify({ kind: 'success', text: '书签已添加' })
+    } catch {
+      notify({ kind: 'error', text: '书签保存失败，请重试。' })
+    }
+  }
+
+  const jumpToBookmark = (offset: number) => {
+    if (!chunks) return
+    let index = 0
+    for (let cursor = 0; cursor < chunks.length; cursor += 1) {
+      if (chunks[cursor].start <= offset) index = cursor
+      else break
+    }
+    virtual.scrollToIndex(index, { align: 'start' })
+    setBookmarkPanel(false)
+  }
+
   if (!book || !chunks) return <div className="reader-loading">正在展开书页…</div>
 
   const percent = Math.min(100, Math.round(((progress?.offset ?? 0) / book.totalLength) * 100))
   return <div className={`reader theme-${settings.theme}`} style={{ '--font-size': `${settings.fontSize}px`, '--line-height': settings.lineHeight } as CSSProperties}>
-    <header className="reader-bar"><button onClick={() => { void persist().finally(() => { location.hash = '/' }) }}>← 书架</button><div><strong>{book.fileName}</strong><span>{percent}%</span></div><button aria-label="阅读设置" onClick={() => setPanel(value => !value)}>Aa</button></header>
+    <header className="reader-bar"><button onClick={() => { void persist().finally(() => { location.hash = '/' }) }}>← 书架</button><div><strong>{book.fileName}</strong><span>{percent}%</span></div><div className="reader-actions"><button aria-label="添加书签" onClick={() => void addBookmark()}>＋签</button><button aria-label="查看书签" onClick={() => { setBookmarkPanel(value => !value); setPanel(false) }}>书签{bookmarks?.length ? ` ${bookmarks.length}` : ''}</button><button aria-label="阅读设置" onClick={() => { setPanel(value => !value); setBookmarkPanel(false) }}>Aa</button></div></header>
     {panel && <aside className="settings">
       <label>字号 <output>{settings.fontSize}</output><input aria-label="字号" type="range" min="15" max="30" value={settings.fontSize} onChange={event => update({ fontSize: Number(event.target.value) })} /></label>
       <label>行距 <output>{settings.lineHeight.toFixed(1)}</output><input aria-label="行距" type="range" min="1.4" max="2.4" step="0.1" value={settings.lineHeight} onChange={event => update({ lineHeight: Number(event.target.value) })} /></label>
       <div className="theme-options"><span>主题</span><button className={settings.theme === 'light' ? 'active' : ''} onClick={() => update({ theme: 'light' })}>纸白</button><button className={settings.theme === 'dark' ? 'active' : ''} onClick={() => update({ theme: 'dark' })}>夜读</button></div>
     </aside>}
+    {bookmarkPanel && <aside className="bookmark-panel" aria-label="书签列表"><div className="bookmark-heading"><strong>我的书签</strong><span>{bookmarks?.length ?? 0} 个</span></div>{bookmarks?.length ? <ol>{bookmarks.map(bookmark => <li key={bookmark.id}><button onClick={() => jumpToBookmark(bookmark.offset)}><span>{Math.round(bookmark.offset / book.totalLength * 100)}%</span><p>{bookmark.excerpt}</p><time>{new Date(bookmark.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time></button><button aria-label="删除书签" onClick={() => void db.bookmarks.delete(bookmark.id).catch(() => notify({ kind: 'error', text: '书签删除失败。' }))}>×</button></li>)}</ol> : <p className="bookmark-empty">还没有书签。阅读到想记住的位置时，点击“＋签”。</p>}</aside>}
     <div className="reading-scroll" ref={scroller} onScroll={onScroll}><div className="reading-space" style={{ height: virtual.getTotalSize() }}>{virtual.getVirtualItems().map(item => <article className="text-chunk" data-index={item.index} ref={virtual.measureElement} key={chunks[item.index].index} style={{ transform: `translateY(${item.start}px)` }}>{chunks[item.index].text}</article>)}</div></div>
   </div>
 }

@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Book, Progress, ReaderSettings, TextChunk } from '../types'
+import type { Book, Bookmark, Progress, ReaderSettings, TextChunk } from '../types'
 import { defaultSettings } from '../types'
 
 class ReadingDatabase extends Dexie {
@@ -7,10 +7,12 @@ class ReadingDatabase extends Dexie {
   chunks!: EntityTable<TextChunk, 'id'>
   progress!: EntityTable<Progress, 'bookId'>
   settings!: EntityTable<ReaderSettings, 'id'>
+  bookmarks!: EntityTable<Bookmark, 'id'>
 
   constructor() {
     super('shiyue-reader')
     this.version(1).stores({ books: 'id,lastReadAt,importedAt', chunks: '++id,[bookId+index],bookId,start', progress: 'bookId', settings: 'id' })
+    this.version(2).stores({ bookmarks: 'id,[bookId+offset],bookId,createdAt' })
   }
 }
 
@@ -25,10 +27,11 @@ export async function saveBook(book: Book, chunks: TextChunk[]) {
 }
 
 export async function removeBook(id: string) {
-  await db.transaction('rw', db.books, db.chunks, db.progress, async () => {
+  await db.transaction('rw', db.books, db.chunks, db.progress, db.bookmarks, async () => {
     await db.books.delete(id)
     await db.chunks.where('bookId').equals(id).delete()
     await db.progress.delete(id)
+    await db.bookmarks.where('bookId').equals(id).delete()
   })
 }
 
