@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test('imports a TXT, opens it, and keeps reading settings', async ({ page }) => {
   await page.goto('/')
+  await expect(page.getByText('记录每一次阅读，让思考留下痕迹。')).toBeVisible()
   await page.locator('input[type=file]').setInputFiles({ name: '山中一夜.txt', mimeType: 'text/plain', buffer: Buffer.from('第一段。\n\n第二段。\n'.repeat(200)) })
   await expect(page.getByRole('dialog')).toContainText('第一段')
   await page.getByRole('button', { name: '确认导入' }).click()
