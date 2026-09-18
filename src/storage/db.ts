@@ -2,17 +2,32 @@ import Dexie, { type EntityTable } from 'dexie'
 import type { Book, Bookmark, Progress, ReaderSettings, TextChunk } from '../types'
 import { defaultSettings } from '../types'
 
-class ReadingDatabase extends Dexie {
+export const DATABASE_NAME = 'jiawei-reading'
+export const LEGACY_DATABASE_NAME = 'shiyue-reader'
+
+export type BusinessTableName = 'books' | 'chunks' | 'progress' | 'settings' | 'bookmarks'
+
+export interface MigrationRecord {
+  key: string
+  outcome: 'migrated' | 'not-needed'
+  reason?: 'legacy-missing' | 'legacy-empty'
+  completedAt: number
+  sourceCounts: Record<BusinessTableName, number>
+}
+
+export class ReadingDatabase extends Dexie {
   books!: EntityTable<Book, 'id'>
   chunks!: EntityTable<TextChunk, 'id'>
   progress!: EntityTable<Progress, 'bookId'>
   settings!: EntityTable<ReaderSettings, 'id'>
   bookmarks!: EntityTable<Bookmark, 'id'>
+  migrationMeta!: EntityTable<MigrationRecord, 'key'>
 
-  constructor() {
-    super('shiyue-reader')
+  constructor(name = DATABASE_NAME) {
+    super(name)
     this.version(1).stores({ books: 'id,lastReadAt,importedAt', chunks: '++id,[bookId+index],bookId,start', progress: 'bookId', settings: 'id' })
     this.version(2).stores({ bookmarks: 'id,[bookId+offset],bookId,createdAt' })
+    this.version(3).stores({ migrationMeta: 'key' })
   }
 }
 
